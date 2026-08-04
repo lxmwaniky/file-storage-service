@@ -19,5 +19,13 @@ func NewRouter(fileRepo *repository.FileRepository) http.Handler {
 		HandleUpload(w, r, fileRepo)
 	})
 
+	mux.HandleFunc("GET /api/v1/files", func(w http.ResponseWriter, r *http.Request) {
+		HandleListFiles(w, r, fileRepo)
+	})
+
+	mux.HandleFunc("GET /api/v1/files/{id}/download", func(w http.ResponseWriter, r *http.Request) {
+		HandleDownloadFile(w, r, fileRepo)
+	})
+
 	return mux
 }

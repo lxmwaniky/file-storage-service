@@ -39,3 +39,52 @@ func (r *FileRepository) Save(ctx context.Context, file *domain.File) error {
 
 	return nil
 }
+
+func (r *FileRepository) FindAll(ctx context.Context) ([]domain.File, error) {
+	query := `SELECT id, original_name, stored_filename, file_size, mime_type, created_at FROM files ORDER BY created_at DESC`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query files: %w", err)
+	}
+	defer rows.Close()
+
+	var files []domain.File
+
+	for rows.Next() {
+		var f domain.File
+		if err := rows.Scan(&f.ID, &f.OriginalName, &f.StoredFileName, &f.FileSize, &f.MimeType, &f.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan file row: %w", err)
+		}
+		files = append(files, f)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating file rows: %w", err)
+	}
+
+	return files, nil
+}
+
+func (r *FileRepository) FindByID(ctx context.Context, id string) (*domain.File, error) {
+	query := `SELECT id, original_name, stored_filename, file_size, mime_type, created_at FROM files WHERE id = $1`
+
+	var f domain.File
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&f.ID,
+		&f.OriginalName,
+		&f.StoredFileName,
+		&f.FileSize,
+		&f.MimeType,
+		&f.CreatedAt,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to query file by id: %w", err)
+	}
+
+	return &f, nil
+}
