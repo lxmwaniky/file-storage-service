@@ -1,8 +1,12 @@
 package httpdelivery
 
-import "net/http"
+import (
+	"net/http"
 
-func NewRouter() http.Handler {
+	"github.com/lxmwaniky/file-storage-service/internal/infrastructure/repository"
+)
+
+func NewRouter(fileRepo *repository.FileRepository) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -11,7 +15,9 @@ func NewRouter() http.Handler {
 		w.Write([]byte(`{"status":"healthy"}`))
 	})
 
-	mux.HandleFunc("POST /api/v1/upload", HandleUpload)
+	mux.HandleFunc("POST /api/v1/upload", func(w http.ResponseWriter, r *http.Request) {
+		HandleUpload(w, r, fileRepo)
+	})
 
 	return mux
 }

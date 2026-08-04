@@ -28,6 +28,7 @@ func (r *FileRepository) Save(ctx context.Context, file *domain.File) error {
 		file.ID,
 		file.OriginalName,
 		file.StoredFileName,
+		file.FileSize,
 		file.MimeType,
 		file.CreatedAt,
 	)

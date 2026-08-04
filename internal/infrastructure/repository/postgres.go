@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type PostgresRepo struct {

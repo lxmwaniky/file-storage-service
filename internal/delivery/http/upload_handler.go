@@ -9,11 +9,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
+
+	"github.com/lxmwaniky/file-storage-service/internal/domain"
+	"github.com/lxmwaniky/file-storage-service/internal/infrastructure/repository"
 )
 
 const MaxUploadSize = 10 << 20
 
-func HandleUpload(w http.ResponseWriter, r *http.Request) {
+func HandleUpload(w http.ResponseWriter, r *http.Request, fileRepo *repository.FileRepository) {
 
 	// Validation
 	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadSize)
@@ -33,14 +37,18 @@ func HandleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	slog.Info("Processing file upload",
-		"filename", header.Filename,
-		"size_bytes", header.Size)
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
 
-	// Transformation
 	fileBytes := make([]byte, 16)
 	rand.Read(fileBytes)
 	fileUUID := hex.EncodeToString(fileBytes)
+
+	slog.Info("Processing file upload",
+		"filename", header.Filename,
+		"size_bytes", header.Size)
 
 	ext := filepath.Ext(header.Filename)
 	safeFilename := fileUUID + ext
@@ -62,6 +70,8 @@ func HandleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer dst.Close()
 
+	writtenBytes, err := io.Copy(dst, file)
+
 	// Streaming
 	if _, err := io.Copy(dst, file); err != nil {
 		slog.Error("Failed to save contents", "error", err)
@@ -69,7 +79,21 @@ func HandleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("File uploaded successfully", "saved_as", safeFilename)
+	// Persist Metadata to PostgreSQL
+	fileDomain := &domain.File{
+		ID:             fileUUID,
+		OriginalName:   header.Filename,
+		StoredFileName: safeFilename,
+		FileSize:       writtenBytes,
+		MimeType:       mimeType,
+		CreatedAt:      time.Now(),
+	}
+
+	if err := fileRepo.Save(r.Context(), fileDomain); err != nil {
+		slog.Error("Failed to save file metadata to database", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 
 	// Response
 	w.Header().Set("Content-Type", "application/json")
