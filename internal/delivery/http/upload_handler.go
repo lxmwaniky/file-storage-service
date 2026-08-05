@@ -45,13 +45,7 @@ func HandleUpload(w http.ResponseWriter, r *http.Request, fileRepo *repository.F
 	fileBytes := make([]byte, 16)
 	rand.Read(fileBytes)
 	fileUUID := hex.EncodeToString(fileBytes)
-
-	slog.Info("Processing file upload",
-		"filename", header.Filename,
-		"size_bytes", header.Size)
-
-	ext := filepath.Ext(header.Filename)
-	safeFilename := fileUUID + ext
+	safeFilename := fmt.Sprintf("%s_%s", fileUUID, header.Filename)
 
 	uploadDir := "./uploads"
 	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
