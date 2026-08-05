@@ -12,6 +12,7 @@ import (
 
 	httpdelivery "github.com/lxmwaniky/file-storage-service/internal/delivery/http"
 	"github.com/lxmwaniky/file-storage-service/internal/infrastructure/repository"
+	"github.com/lxmwaniky/file-storage-service/internal/infrastructure/storage"
 )
 
 func main() {
@@ -29,7 +30,8 @@ func main() {
 	defer pgRepo.DB.Close()
 
 	fileRepo := repository.NewFileRepository(pgRepo.DB)
-	router := httpdelivery.NewRouter(fileRepo)
+	storageProvider := storage.NewLocalStorage("./uploads")
+	router := httpdelivery.NewRouter(fileRepo, storageProvider)
 
 	port := ":8080"
 

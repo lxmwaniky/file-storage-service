@@ -4,11 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/lxmwaniky/file-storage-service/internal/domain"
@@ -17,7 +14,7 @@ import (
 
 const MaxUploadSize = 10 << 20
 
-func HandleUpload(w http.ResponseWriter, r *http.Request, fileRepo *repository.FileRepository) {
+func HandleUpload(w http.ResponseWriter, r *http.Request, fileRepo *repository.FileRepository, storageService domain.StorageService) {
 
 	// Validation
 	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadSize)
@@ -47,38 +44,19 @@ func HandleUpload(w http.ResponseWriter, r *http.Request, fileRepo *repository.F
 	fileUUID := hex.EncodeToString(fileBytes)
 	safeFilename := fmt.Sprintf("%s_%s", fileUUID, header.Filename)
 
-	uploadDir := "./uploads"
-	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
-		slog.Error("Failed to create upload directory", "error", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	dstPath := filepath.Join(uploadDir, safeFilename)
-
-	dst, err := os.Create(dstPath)
-	if err != nil {
-		slog.Error("Failed to create destination file on disk", "error", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	defer dst.Close()
-
-	writtenBytes, err := io.Copy(dst, file)
-
-	// Streaming
-	if _, err := io.Copy(dst, file); err != nil {
-		slog.Error("Failed to save contents", "error", err)
+	if err := storageService.Save(r.Context(), safeFilename, file); err != nil {
+		slog.Error("Failed to save file via storage service", "error", err)
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return
 	}
 
-	// Persist Metadata to PostgreSQL
+	fileSize := header.Size
+
 	fileDomain := &domain.File{
 		ID:             fileUUID,
 		OriginalName:   header.Filename,
 		StoredFileName: safeFilename,
-		FileSize:       writtenBytes,
+		FileSize:       fileSize,
 		MimeType:       mimeType,
 		CreatedAt:      time.Now(),
 	}
