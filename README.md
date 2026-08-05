@@ -1,18 +1,18 @@
 # File Storage Service
 
-A file upload, metadata tracking, and streaming service built in Go. Designed with a clean-architecture layering, structured logging, memory-safe streaming, and basic input validation.
+A file upload, metadata tracking, and streaming service built in Go. Designed with clean-architecture layering, structured logging, memory-safe streaming, and basic input validation.
 
 ---
 
 ## Architecture Notes
 
-- **Core HTTP:** Go's native `net/http` and `ServeMux`, using native path wildcard routing (`GET /api/v1/files/{id}/download`).
-- **Storage split:** Raw file bytes are streamed to local disk (`./uploads`); metadata (original name, size, MIME type, timestamp) is persisted to PostgreSQL via a single `INSERT`.
+- **Core HTTP:** Go's native `net/http` and `ServeMux`, using native path wildcard routing (`GET /api/v1/files/{id}/download`), with configured read/write/idle timeouts and graceful shutdown on `SIGINT`/`SIGTERM`.
+- **Storage split:** Raw file bytes are written through a `domain.StorageService` interface (currently implemented by `LocalStorage`, which writes to `./uploads`); metadata (original name, size, MIME type, timestamp) is persisted to PostgreSQL via a single `INSERT`.
 - **Observability:** Structured logging via the standard library `log/slog`, JSON-formatted.
-- **Validation:** Upload size is capped with `http.MaxBytesReader` (10MB) to reject oversized payloads. Stored filenames are replaced with randomized hex-encoded identifiers (16 bytes from `crypto/rand`) rather than the client-supplied name, avoiding path traversal via user input.
+- **Validation:** Upload size is capped with `http.MaxBytesReader` (10MB) to reject oversized payloads. Stored filenames are prefixed with a random hex identifier (16 bytes from `crypto/rand`) in the form `<hexid>_<original-filename>` — this avoids overwriting files with the same name, but the original filename is still part of the stored key.
 - **Streaming:** Uploads and downloads use `io.Copy`, so file contents aren't buffered fully in memory.
 
-Known gaps: the PostgreSQL connection string is currently hardcoded in `cmd/api/main.go` rather than read from configuration; `internal/config`, `internal/usecase`, and `internal/infrastructure/storage` exist as empty placeholder packages for future work.
+Known gaps: the PostgreSQL connection string is currently hardcoded in `cmd/api/main.go` rather than read from configuration; `internal/config` and `internal/usecase` exist as empty placeholder packages for future work.
 
 ---
 
@@ -22,15 +22,15 @@ Known gaps: the PostgreSQL connection string is currently hardcoded in `cmd/api/
 .
 ├── cmd
 │   └── api
-│       └── main.go              # Application entrypoint & server bootstrap
+│       └── main.go              # Entrypoint, server bootstrap, graceful shutdown
 ├── internal
 │   ├── config                   # Empty — planned config loading
 │   ├── delivery
 │   │   └── http                 # HTTP router and handlers
-│   ├── domain                   # Core models (File)
+│   ├── domain                   # Core models (File) and interfaces (StorageService)
 │   ├── infrastructure
 │   │   ├── repository           # PostgreSQL connection and data access
-│   │   └── storage              # Empty — planned storage abstraction
+│   │   └── storage              # LocalStorage implementation of StorageService
 │   └── usecase                  # Empty — planned business logic layer
 ├── uploads                      # Local storage for uploaded files (gitignored)
 ├── go.mod
@@ -69,7 +69,7 @@ The connection string used by the app is set in [cmd/api/main.go](cmd/api/main.g
 go run ./cmd/api
 ```
 
-The server listens on `:8080`.
+The server listens on `:8080` and shuts down gracefully on Ctrl+C.
 
 ---
 
@@ -85,7 +85,7 @@ curl http://localhost:8080/health
 
 ### `POST /api/v1/upload`
 
-Accepts a multipart form file upload (field name `file`), rejects payloads over 10MB, generates a random stored filename, streams the content to disk, and writes the metadata row to PostgreSQL.
+Accepts a multipart form file upload (field name `file`), rejects payloads over 10MB, saves the content via the storage service, and writes the metadata row to PostgreSQL.
 
 ```bash
 curl -F "file=@path/to/file.pdf" http://localhost:8080/api/v1/upload
