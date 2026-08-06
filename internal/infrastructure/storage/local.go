@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type LocalStorage struct {
@@ -41,4 +42,8 @@ func (s *LocalStorage) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("failed to delete local file: %w", err)
 	}
 	return nil
+}
+
+func (s *LocalStorage) GeneratePresignedUploadURL(ctx context.Context, key string, expiration time.Duration) (string, error) {
+	return "", fmt.Errorf("presigned urls are not supported by local storage provider")
 }
