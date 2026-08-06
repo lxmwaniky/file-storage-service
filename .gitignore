@@ -1,3 +1,4 @@
 uploads/
 docker-compose.yaml
 vendor/
+.env

@@ -10,6 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	httpdelivery "github.com/lxmwaniky/file-storage-service/internal/delivery/http"
 	"github.com/lxmwaniky/file-storage-service/internal/infrastructure/repository"
 	"github.com/lxmwaniky/file-storage-service/internal/infrastructure/storage"
@@ -20,9 +23,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	dbConnString := "postgres://alex:wantam@localhost:5432/file_storage?sslmode=disable"
-
 	pgRepo, err := repository.NewPostgresRepo(dbConnString)
-
 	if err != nil {
 		slog.Error("Failed to connect to database", "error", err)
 		os.Exit(1)
@@ -30,11 +31,32 @@ func main() {
 	defer pgRepo.DB.Close()
 
 	fileRepo := repository.NewFileRepository(pgRepo.DB)
-	storageProvider := storage.NewLocalStorage("./uploads")
+
+	awsRegion := os.Getenv("AWS_REGION")
+	if awsRegion == "" {
+		awsRegion = "af-south-1"
+	}
+
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(awsRegion))
+	if err != nil {
+		slog.Error("Failed to load AWS SDK configuration", "error", err)
+		os.Exit(1)
+	}
+
+	s3Client := s3.NewFromConfig(cfg)
+
+	bucketName := os.Getenv("AWS_S3_BUCKET_NAME")
+	if bucketName == "" {
+		slog.Error("AWS_S3_BUCKET_NAME environment variable is not set")
+		os.Exit(1)
+	}
+
+	storageProvider := storage.NewS3Storage(s3Client, bucketName)
+	slog.Info("Initialized S3 storage provider", "bucket", bucketName, "region", awsRegion)
+
 	router := httpdelivery.NewRouter(fileRepo, storageProvider)
 
 	port := ":8080"
-
 	server := &http.Server{
 		Addr:         port,
 		Handler:      router,
