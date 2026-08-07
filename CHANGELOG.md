@@ -5,19 +5,22 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
-- `domain.StorageService.Get(ctx, key) (io.ReadCloser, error)`, implemented by both `LocalStorage` and `S3Storage`, so downloads read from whichever backend actually stored the file.
-- `domain.ErrObjectNotFound` sentinel, returned by `Get` on both backends (translated from `os.IsNotExist` locally and `*types.NoSuchKey` on S3), so handlers can distinguish "not found" from other storage failures without knowing the backend.
+- `domain.StorageService.Get(ctx, key) (io.ReadCloser, error)`, implemented by `S3Storage`, so downloads read from the same backend uploads are written to.
+- `domain.ErrObjectNotFound` sentinel, returned by `Get` (translated from `*types.NoSuchKey` on S3), so handlers can distinguish "not found" from other storage failures without knowing the backend.
 - `internal/config` package: a single `Config` struct loaded once in `main()` via `config.Load()`, replacing scattered `os.Getenv` calls and a hardcoded connection string. `AWS_S3_BUCKET_NAME` is required; `DATABASE_URL`, `AWS_REGION`, and `PORT` have defaults.
+
+### Removed
+- `LocalStorage` (`internal/infrastructure/storage/local.go`) — implemented `domain.StorageService` but was never wired up anywhere; `main.go` has always used `S3Storage`. Deleted as dead code rather than left unreachable.
 
 ### Fixed
 - **Downloads were broken for anything uploaded via `S3Storage`**: `HandleDownloadFile` read straight from the local `./uploads` directory regardless of storage backend. It now calls `storageService.Get` instead.
-- **Path traversal via client-supplied filename**: `header.Filename` was embedded directly into the storage key; a filename containing `..` segments could write outside `LocalStorage`'s upload directory. Filenames are now passed through `filepath.Base` before use, and `LocalStorage` additionally rejects any resolved path outside its upload directory as defense in depth.
+- **Path traversal via client-supplied filename**: `header.Filename` was embedded directly into the storage key; a filename containing `..` segments could be used to construct an unexpected S3 key. Filenames are now passed through `filepath.Base` before use.
 - `pgRepo.DB.Close()` was called twice (once via `defer`, once explicitly during graceful shutdown) — removed the redundant `defer`.
 - `context.TODO()` used for loading AWS SDK config in `main()` replaced with `context.Background()`.
 - `crypto/rand.Read`'s return values (including its error) were discarded entirely; the error is now checked and treated as a fatal request error.
 
 ### Changed
-- `NewLocalStorage`/`NewS3Storage` now return `domain.StorageService` instead of their concrete types.
+- `NewS3Storage` now returns `domain.StorageService` instead of its concrete type.
 
 ## 2026-08-06
 

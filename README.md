@@ -7,15 +7,16 @@ A file upload, metadata tracking, and streaming service built in Go. Designed wi
 ## Architecture Notes
 
 - **Core HTTP:** Go's native `net/http` and `ServeMux`, using native path wildcard routing (`GET /api/v1/files/{id}/download`), with configured read/write/idle timeouts and graceful shutdown on `SIGINT`/`SIGTERM`.
-- **Storage split:** Raw file bytes are written and read through a `domain.StorageService` interface (`Save`/`Get`/`Delete`/`GeneratePresignedUploadURL`). Two implementations exist — `LocalStorage` (writes to `./uploads`) and `S3Storage` (S3 bucket, with presigned-URL generation). `cmd/api/main.go` currently wires up `S3Storage` only. Metadata (original name, size, MIME type, timestamp) is persisted to PostgreSQL via a single `INSERT`.
+- **Storage split:** Raw file bytes are written and read through a `domain.StorageService` interface (`Save`/`Get`/`Delete`/`GeneratePresignedUploadURL`), currently implemented only by `S3Storage`. Metadata (original name, size, MIME type, timestamp) is persisted to PostgreSQL via a single `INSERT`.
 - **Observability:** Structured logging via the standard library `log/slog`, JSON-formatted.
-- **Validation:** Upload size is capped with `http.MaxBytesReader` (10MB) to reject oversized payloads. Stored filenames are prefixed with a random hex identifier (16 bytes from `crypto/rand`) in the form `<hexid>_<basename>`, where the client-supplied filename is passed through `filepath.Base` (and `LocalStorage` additionally rejects any resolved path outside its upload directory) to prevent path traversal.
+- **Validation:** Upload size is capped with `http.MaxBytesReader` (10MB) to reject oversized payloads. Stored filenames are prefixed with a random hex identifier (16 bytes from `crypto/rand`) in the form `<hexid>_<basename>`, where the client-supplied filename is passed through `filepath.Base` to prevent path traversal.
 - **Config:** A single `internal/config.Config`, loaded once at startup in `main()`. `AWS_S3_BUCKET_NAME` is required (the app exits if it's unset); everything else falls back to a sane default.
 
 Known gaps:
 - `internal/usecase` exists as an empty placeholder package for future business-logic separation.
 - The `DATABASE_URL` default (used when the env var isn't set) points at local dev credentials committed in `internal/config/config.go` — fine for local development, but should be required (no fallback) once there's a real deployment target.
-- `GeneratePresignedUploadURL` is implemented on both storage backends but not yet wired into any HTTP handler.
+- `GeneratePresignedUploadURL` is implemented on `S3Storage` but not yet wired into any HTTP handler.
+- Only one `StorageService` backend exists now (S3). If local/offline development without AWS access becomes a need again, that's a reason to reintroduce a second implementation — not a reason to keep an unused one around in the meantime.
 
 ---
 
@@ -33,7 +34,7 @@ Known gaps:
 │   ├── domain                   # Core models (File) and interfaces (StorageService)
 │   ├── infrastructure
 │   │   ├── repository           # PostgreSQL connection and data access
-│   │   └── storage              # LocalStorage and S3Storage implementations of StorageService
+│   │   └── storage              # S3Storage implementation of StorageService
 │   └── usecase                  # Empty — planned business logic layer
 ├── uploads                      # Local storage for uploaded files (gitignored)
 ├── .env.example                 # Documented env vars
