@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/lxmwaniky/file-storage-service/internal/domain"
@@ -40,9 +41,15 @@ func HandleUpload(w http.ResponseWriter, r *http.Request, fileRepo *repository.F
 	}
 
 	fileBytes := make([]byte, 16)
-	rand.Read(fileBytes)
+	if _, err := rand.Read(fileBytes); err != nil {
+		slog.Error("Failed to generate random file identifier", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 	fileUUID := hex.EncodeToString(fileBytes)
-	safeFilename := fmt.Sprintf("%s_%s", fileUUID, header.Filename)
+
+	baseFilename := filepath.Base(header.Filename)
+	safeFilename := fmt.Sprintf("%s_%s", fileUUID, baseFilename)
 
 	if err := storageService.Save(r.Context(), safeFilename, file); err != nil {
 		slog.Error("Failed to save file via storage service", "error", err)

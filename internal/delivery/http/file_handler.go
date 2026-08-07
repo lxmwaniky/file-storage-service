@@ -2,11 +2,10 @@ package httpdelivery
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 
 	"github.com/lxmwaniky/file-storage-service/internal/domain"
 	"github.com/lxmwaniky/file-storage-service/internal/infrastructure/repository"
@@ -28,7 +27,7 @@ func HandleListFiles(w http.ResponseWriter, r *http.Request, fileRepo *repositor
 	json.NewEncoder(w).Encode(files)
 }
 
-func HandleDownloadFile(w http.ResponseWriter, r *http.Request, fileRepo *repository.FileRepository) {
+func HandleDownloadFile(w http.ResponseWriter, r *http.Request, fileRepo *repository.FileRepository, storageService domain.StorageService) {
 	id := r.PathValue("id")
 	if id == "" {
 		slog.Warn("Download attempt with missing file ID")
@@ -50,16 +49,20 @@ func HandleDownloadFile(w http.ResponseWriter, r *http.Request, fileRepo *reposi
 		return
 	}
 
-	filePath := filepath.Join("./uploads", fileMeta.StoredFileName)
-	targetFile, err := os.Open(filePath)
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		slog.Error("CRITICAL: Database record exists, but physical file is missing from storage!",
-			"file_id", id,
-			"stored_filename", fileMeta.StoredFileName,
-		)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"error":"file missing from storage provider"}`))
+	targetFile, err := storageService.Get(r.Context(), fileMeta.StoredFileName)
+	if err != nil {
+		if errors.Is(err, domain.ErrObjectNotFound) {
+			slog.Error("CRITICAL: Database record exists, but object is missing from storage!",
+				"file_id", id,
+				"stored_filename", fileMeta.StoredFileName,
+			)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"error":"file missing from storage provider"}`))
+			return
+		}
+		slog.Error("Failed to retrieve object from storage", "file_id", id, "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 	defer targetFile.Close()

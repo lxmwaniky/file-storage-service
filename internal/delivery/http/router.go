@@ -25,7 +25,7 @@ func NewRouter(fileRepo *repository.FileRepository, storageService domain.Storag
 	})
 
 	mux.HandleFunc("GET /api/v1/files/{id}/download", func(w http.ResponseWriter, r *http.Request) {
-		HandleDownloadFile(w, r, fileRepo)
+		HandleDownloadFile(w, r, fileRepo, storageService)
 	})
 
 	return mux

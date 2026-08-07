@@ -7,14 +7,15 @@ A file upload, metadata tracking, and streaming service built in Go. Designed wi
 ## Architecture Notes
 
 - **Core HTTP:** Go's native `net/http` and `ServeMux`, using native path wildcard routing (`GET /api/v1/files/{id}/download`), with configured read/write/idle timeouts and graceful shutdown on `SIGINT`/`SIGTERM`.
-- **Storage split:** Raw file bytes are written through a `domain.StorageService` interface. Two implementations exist — `LocalStorage` (writes to `./uploads`) and `S3Storage` (uploads to an S3 bucket, with presigned-URL generation). `cmd/api/main.go` currently wires up `S3Storage` only. Metadata (original name, size, MIME type, timestamp) is persisted to PostgreSQL via a single `INSERT`.
+- **Storage split:** Raw file bytes are written and read through a `domain.StorageService` interface (`Save`/`Get`/`Delete`/`GeneratePresignedUploadURL`). Two implementations exist — `LocalStorage` (writes to `./uploads`) and `S3Storage` (S3 bucket, with presigned-URL generation). `cmd/api/main.go` currently wires up `S3Storage` only. Metadata (original name, size, MIME type, timestamp) is persisted to PostgreSQL via a single `INSERT`.
 - **Observability:** Structured logging via the standard library `log/slog`, JSON-formatted.
-- **Validation:** Upload size is capped with `http.MaxBytesReader` (10MB) to reject oversized payloads. Stored filenames are prefixed with a random hex identifier (16 bytes from `crypto/rand`) in the form `<hexid>_<original-filename>` — this avoids overwriting files with the same name, but the original filename is still part of the stored key, unsanitized.
+- **Validation:** Upload size is capped with `http.MaxBytesReader` (10MB) to reject oversized payloads. Stored filenames are prefixed with a random hex identifier (16 bytes from `crypto/rand`) in the form `<hexid>_<basename>`, where the client-supplied filename is passed through `filepath.Base` (and `LocalStorage` additionally rejects any resolved path outside its upload directory) to prevent path traversal.
+- **Config:** A single `internal/config.Config`, loaded once at startup in `main()`. `AWS_S3_BUCKET_NAME` is required (the app exits if it's unset); everything else falls back to a sane default.
 
 Known gaps:
-- **Downloads are broken with the current wiring.** `GET /api/v1/files/{id}/download` reads from the local `./uploads` directory regardless of which storage backend was used for the upload. Since `main.go` now wires `S3Storage` for uploads, files uploaded through this service cannot currently be downloaded through it. `domain.StorageService` has no `Get`/read method yet.
-- The PostgreSQL connection string is hardcoded in `cmd/api/main.go`, even though `.env.example` documents a `DATABASE_URL` variable — that variable isn't read anywhere yet.
-- `internal/config` and `internal/usecase` exist as empty placeholder packages for future work.
+- `internal/usecase` exists as an empty placeholder package for future business-logic separation.
+- The `DATABASE_URL` default (used when the env var isn't set) points at local dev credentials committed in `internal/config/config.go` — fine for local development, but should be required (no fallback) once there's a real deployment target.
+- `GeneratePresignedUploadURL` is implemented on both storage backends but not yet wired into any HTTP handler.
 
 ---
 
@@ -24,9 +25,9 @@ Known gaps:
 .
 ├── cmd
 │   └── api
-│       └── main.go              # Entrypoint, server bootstrap, graceful shutdown
+│       └── main.go              # Entrypoint, config load, server bootstrap, graceful shutdown
 ├── internal
-│   ├── config                   # Empty — planned config loading
+│   ├── config                   # Config struct + env loading
 │   ├── delivery
 │   │   └── http                 # HTTP router and handlers
 │   ├── domain                   # Core models (File) and interfaces (StorageService)
@@ -35,7 +36,7 @@ Known gaps:
 │   │   └── storage              # LocalStorage and S3Storage implementations of StorageService
 │   └── usecase                  # Empty — planned business logic layer
 ├── uploads                      # Local storage for uploaded files (gitignored)
-├── .env.example                 # Documented env vars (not all are wired up yet — see Known gaps)
+├── .env.example                 # Documented env vars
 ├── go.mod
 └── README.md
 ```
@@ -59,7 +60,8 @@ Copy `.env.example` and fill in values, then export them into your shell (there 
 | `AWS_S3_BUCKET_NAME` | Yes | App exits at startup if unset. |
 | `AWS_REGION` | No | Defaults to `af-south-1`. |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Yes (or another AWS credential source) | Picked up by the default AWS SDK credential chain. |
-| `DATABASE_URL` | Not yet used | See Known gaps — update the connection string directly in `cmd/api/main.go` for now. |
+| `DATABASE_URL` | No | Falls back to a local dev Postgres URL — see Known gaps. |
+| `PORT` | No | Defaults to `:8080`. |
 
 ### Database setup
 
@@ -82,7 +84,7 @@ CREATE TABLE IF NOT EXISTS files (
 go run ./cmd/api
 ```
 
-The server listens on `:8080` and shuts down gracefully on Ctrl+C.
+The server listens on `:8080` (or `$PORT`) and shuts down gracefully on Ctrl+C.
 
 ---
 
@@ -114,7 +116,7 @@ curl http://localhost:8080/api/v1/files
 
 ### `GET /api/v1/files/{id}/download`
 
-Looks up file metadata by ID and streams the file back with its original filename and MIME type. Currently reads from local disk only — see Known gaps.
+Looks up file metadata by ID, fetches the object from the storage service, and streams it back with its original filename and MIME type.
 
 ```bash
 curl -O -J http://localhost:8080/api/v1/files/{id}/download

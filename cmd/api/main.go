@@ -10,9 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/lxmwaniky/file-storage-service/internal/config"
 	httpdelivery "github.com/lxmwaniky/file-storage-service/internal/delivery/http"
 	"github.com/lxmwaniky/file-storage-service/internal/infrastructure/repository"
 	"github.com/lxmwaniky/file-storage-service/internal/infrastructure/storage"
@@ -22,43 +23,34 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	dbConnString := "postgres://alex:wantam@localhost:5432/file_storage?sslmode=disable"
-	pgRepo, err := repository.NewPostgresRepo(dbConnString)
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("Failed to load configuration", "error", err)
+		os.Exit(1)
+	}
+
+	pgRepo, err := repository.NewPostgresRepo(cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("Failed to connect to database", "error", err)
 		os.Exit(1)
 	}
-	defer pgRepo.DB.Close()
 
 	fileRepo := repository.NewFileRepository(pgRepo.DB)
 
-	awsRegion := os.Getenv("AWS_REGION")
-	if awsRegion == "" {
-		awsRegion = "af-south-1"
-	}
-
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(awsRegion))
+	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion(cfg.AWSRegion))
 	if err != nil {
 		slog.Error("Failed to load AWS SDK configuration", "error", err)
 		os.Exit(1)
 	}
 
-	s3Client := s3.NewFromConfig(cfg)
-
-	bucketName := os.Getenv("AWS_S3_BUCKET_NAME")
-	if bucketName == "" {
-		slog.Error("AWS_S3_BUCKET_NAME environment variable is not set")
-		os.Exit(1)
-	}
-
-	storageProvider := storage.NewS3Storage(s3Client, bucketName)
-	slog.Info("Initialized S3 storage provider", "bucket", bucketName, "region", awsRegion)
+	s3Client := s3.NewFromConfig(awsCfg)
+	storageProvider := storage.NewS3Storage(s3Client, cfg.AWSS3BucketName)
+	slog.Info("Initialized S3 storage provider", "bucket", cfg.AWSS3BucketName, "region", cfg.AWSRegion)
 
 	router := httpdelivery.NewRouter(fileRepo, storageProvider)
 
-	port := ":8080"
 	server := &http.Server{
-		Addr:         port,
+		Addr:         cfg.Port,
 		Handler:      router,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
@@ -66,7 +58,7 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("Starting server", "port", port)
+		slog.Info("Starting server", "port", cfg.Port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("Server failed to start", "error", err)
 			os.Exit(1)

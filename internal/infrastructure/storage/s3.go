@@ -2,12 +2,16 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+
+	"github.com/lxmwaniky/file-storage-service/internal/domain"
 )
 
 type S3Storage struct {
@@ -16,7 +20,7 @@ type S3Storage struct {
 	bucketName    string
 }
 
-func NewS3Storage(client *s3.Client, bucketName string) *S3Storage {
+func NewS3Storage(client *s3.Client, bucketName string) domain.StorageService {
 	return &S3Storage{
 		client:        client,
 		presignClient: s3.NewPresignClient(client),
@@ -35,6 +39,22 @@ func (s *S3Storage) Save(ctx context.Context, key string, src io.Reader) error {
 		return fmt.Errorf("failed to upload object to s3: %w", err)
 	}
 	return nil
+}
+
+// Get retrieves an object from s3
+func (s *S3Storage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	output, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.bucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		var noSuchKey *types.NoSuchKey
+		if errors.As(err, &noSuchKey) {
+			return nil, domain.ErrObjectNotFound
+		}
+		return nil, fmt.Errorf("failed to get object from s3: %w", err)
+	}
+	return output.Body, nil
 }
 
 // Delete from s3
